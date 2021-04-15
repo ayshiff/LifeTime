@@ -2,12 +2,20 @@ open Belt
 open ReactNative
 open ReactMultiversal
 
+let rightSpace = 40.
+
 let styles = {
   open Style
   {
     "text": textStyle(~fontSize=16., ~lineHeight=16. *. 1.4, ()),
     "durationText": textStyle(~fontSize=12., ~lineHeight=12., ~fontWeight=#_700, ()),
     "dash": style(~alignSelf=#stretch, ()),
+    "container": viewStyle(
+      ~flexDirection=#row,
+      ~alignItems=#flexEnd,
+      ~justifyContent=#flexEnd,
+      (),
+    ),
   }
 }->StyleSheet.create
 
@@ -21,6 +29,7 @@ let make = (
   ~startDate,
   ~supposedEndDate,
   ~categoryId,
+  ~width,
 ) => {
   let (settings, _setSettings) = React.useContext(AppSettings.context)
 
@@ -29,25 +38,15 @@ let make = (
   let (_, _, colorName, _) = ActivityCategories.getFromId(categoryId)
   let backgroundColor = colorName->ActivityCategories.getColor(theme.mode)
 
-  let (width, setWidth) = React.useState(() => 0.)
-  let onLayout = React.useCallback1((layoutEvent: Event.layoutEvent) => {
-    let width = layoutEvent.nativeEvent.layout.width
-    setWidth(_ => width)
-  }, [setWidth])
-
   let supposedNumberOfDays = Date.durationInMs(startDate, supposedEndDate)->Date.msToDays
   let dates =
     Array.range(0, supposedNumberOfDays->int_of_float)->Array.map(n =>
       startDate->DateFns.addDays(n->Js.Int.toFloat)
     )
+  
+  let nb = dates->Array.length->float
 
   let eventsPerDate = React.useMemo4(() => {
-    let events =
-      events->Calendars.filterEvents(
-        settings.calendarsSkipped,
-        settings.activitiesSkippedFlag,
-        settings.activitiesSkipped,
-      )
     let minutesInDay = 1440.
     let minUnit = width /. minutesInDay
     dates->Array.map(date => {
@@ -101,8 +100,10 @@ let make = (
   }
 
   <Row>
-    <Spacer size=S />
-    <View onLayout style={Predefined.styles["flexGrow"]}>
+    <View style={
+        open Style
+        array([styles["container"], viewStyle(~width=(width -. rightSpace)->dp, ())])
+      }>
       <View
         style={
           open Style
@@ -110,9 +111,10 @@ let make = (
             StyleSheet.absoluteFill,
             Predefined.styles["rowSpaceBetween"],
             boxStyle,
-            viewStyle(~width=width->dp, ()),
+            viewStyle(~width=(width -. rightSpace)->dp, ()),
           ])
-        }>
+        }
+        >
         {Array.range(0, supposedNumberOfDays->int_of_float)
         ->Array.map(i =>
           <React.Fragment key={i->string_of_int}>
@@ -124,6 +126,7 @@ let make = (
                 viewStyle(
                   ~position=#absolute,
                   ~left=-20.->dp,
+                  ~width=(100. /. nb)->pct,
                   ~top=(104. /. supposedNumberOfDays *. i->float)->pct,
                   (),
                 )
@@ -149,7 +152,7 @@ let make = (
           open Style
           array([
             Predefined.styles["rowSpaceBetween"],
-            viewStyle(~width=(width +. 30.)->dp, ~position=#absolute, ~bottom=15.->dp, ()),
+            viewStyle(~width=(width -. rightSpace)->dp, ~position=#absolute, ~bottom=15.->dp, ()),
           ])
         }>
         {Array.range(0, slices)
@@ -187,11 +190,11 @@ let make = (
                   open Style
                   viewStyle(~bottom=-15.->dp, ())
                 }>
-                <Text
+                <Text                                    
                   style={
                     open Style
                     array([
-                      textStyle(~top=5.->dp, ~right=10.->dp, ()),
+                      textStyle(~top=5.->dp, ~right=15.->dp, ()),
                       theme.styles["textLight2"],
                       textStyle(~fontSize=10., ~lineHeight=10., ()),
                     ])
@@ -214,7 +217,7 @@ let make = (
                 ~right=0.->dp,
                 ~bottom=-10.->pct,
                 ~height=StyleSheet.hairlineWidth->dp,
-                ~width=width->dp,
+                ~width=(width -. rightSpace)->dp,
                 ~backgroundColor=theme.colors.gray5,
                 (),
               ),
@@ -270,6 +273,6 @@ let make = (
         ->React.array}
       </View>
     </View>
-    <Spacer />
+    <Spacer size=Custom(rightSpace) />
   </Row>
 }

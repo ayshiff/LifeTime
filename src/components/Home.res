@@ -76,6 +76,7 @@ let make = (~onGetStarted, ~refreshing, ~onRefreshDone, ~onFiltersPress, ~onActi
   | Done(events) => Some(events)
   | _ => None
   }
+  
   let mapTitleDuration =
     events->Option.map(es =>
       es
@@ -172,7 +173,7 @@ let make = (~onGetStarted, ~refreshing, ~onRefreshDone, ~onFiltersPress, ~onActi
       </Row>
     </View>
     <ListSeparator />
-    <View style={Style.array([theme.styles["background"], styleWidth])}>
+    <View style={theme.styles["background"]}>
       <Spacer />
       <SpacedView vertical=None horizontal=scrollViewSpace>
         <Text style={theme.styles["textLight2"]}>

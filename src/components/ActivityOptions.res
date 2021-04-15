@@ -1,7 +1,8 @@
 open Belt
 open ReactNative
 open ReactMultiversal
-open VirtualizedList
+
+let rightSpace = 40.
 
 @react.component
 let make = (
@@ -16,61 +17,46 @@ let make = (
 
   let windowDimensions = Dimensions.useWindowDimensions()
 
-  let styleWidth = {
-    open Style
-    style(~width=windowDimensions.width->dp, ())
-  }
+  let appStateUpdateIsActive = ReactNativeHooks.useAppStateUpdateIsActive()
+  React.useEffect2(() => {
+    if appStateUpdateIsActive {
+      requestUpdate()
+    }
+    None
+  }, (appStateUpdateIsActive, requestUpdate))
 
-  React.useEffect3(() => {
+  let (today, todayUpdate) = Date.Hooks.useToday()
+
+  React.useEffect4(() => {
     if refreshing {
+      Log.info("ActivityOption: refreshing...")
+      todayUpdate()
       requestUpdate()
       onRefreshDone()
     }
     None
-  }, (refreshing, requestUpdate, onRefreshDone))
+  }, (refreshing, todayUpdate, requestUpdate, onRefreshDone))
 
-  let (today, today_set) = React.useState(() => Date.now())
-  let (appState, _previousAppState) = ReactNativeHooks.useAppState()
-  React.useEffect3(() => {
-    if appState === #active {
-      requestUpdate()
-      today_set(_ => Date.now())
-    }
-    None
-  }, (appState, today_set, requestUpdate))
+  let todayDates = Date.Hooks.useWeekDates(today)
 
-  let (last5Weeks, last5Weeks_set) = React.useState(() =>
-    Array.range(0, 5)->Array.map(currentWeekReverseIndex =>
-      Date.weekDates(today->DateFns.addDays((-currentWeekReverseIndex * 7)->Js.Int.toFloat))
-    )
-  )
-  React.useEffect2(() => {
-    last5Weeks_set(_ =>
-      Array.range(0, 5)->Array.map(currentWeekReverseIndex =>
+  let last5Weeks = React.useMemo1(
+    () =>
+      Array.range(0, 5)
+      ->Array.map(currentWeekReverseIndex =>
         Date.weekDates(today->DateFns.addDays((-currentWeekReverseIndex * 7)->Js.Int.toFloat))
       )
-    )
-    None
-  }, (today, last5Weeks_set))
+      ->Array.reverse,
+    [today],
+  )
 
-  let ((startDate, supposedEndDate), currentDates_set) = React.useState(() => {
-    let (start, end) = currentWeek
-    (start->Js.Date.fromString, end->Js.Date.fromString)
-  })
-
-  let onViewableItemsChanged = React.useRef(itemsChanged =>
-    if itemsChanged.viewableItems->Array.length == 1 {
-      itemsChanged.viewableItems[0]
-      ->Option.map(wrapper => currentDates_set(_ => wrapper.item))
-      ->ignore
-    }
-  ).current
-
+  let (currentDates, currentDates_set) = React.useState(() =>
+    last5Weeks[last5Weeks->Array.length - 1]->Option.getWithDefault(todayDates)
+  )
+  let (startDate, supposedEndDate) = currentDates
   let endDate = supposedEndDate->Date.min(today)
 
   let fetchedEvents = getEvents(startDate, endDate)
   React.useEffect4(() => {
-    // Log.info(("Goals fetchEvents", startDate, endDate))
     switch fetchedEvents {
     | NotAsked => fetchEvents(startDate, endDate)
     | _ => ()
@@ -78,9 +64,21 @@ let make = (
     None
   }, (fetchEvents, fetchedEvents, startDate, endDate))
   let events = switch fetchedEvents {
-  | Done(evts) => Some(evts)
+  | Done(events) => Some(events)
   | _ => None
   }
+
+  let scrollViewRef = React.useRef(Js.Nullable.null)
+  let scrollViewWidth = windowDimensions.width
+
+  let onMomentumScrollEnd = React.useCallback5((event: Event.scrollEvent) => {
+    let x = event.nativeEvent.contentOffset.x
+    let index = (x /. scrollViewWidth)->Js.Math.unsafe_round
+    let dates = last5Weeks[index]->Option.getWithDefault(todayDates)
+    if dates !== currentDates {
+      currentDates_set(_ => dates)
+    }
+  }, (currentDates_set, currentDates, todayDates, scrollViewWidth, last5Weeks))
 
   let filteredEvents =
     events
@@ -97,37 +95,27 @@ let make = (
   let (todayFirst, _) = todayDates
   let (previousFirst, _) = previousDates
 
-  let getItemLayout = React.useMemo1(((), _items, index) => {
-    length: windowDimensions.width,
-    offset: windowDimensions.width *. index->float,
-    index: index,
-  }, [windowDimensions.width])
-
-  let renderItem = (renderItemProps: renderItemProps<'a>) => {
-    let (currentStartDate, currentSupposedEndDate) = renderItemProps.item
-    <WeeklyBarChartDetail
-      today
-      todayFirst
-      previousFirst
-      startDate=currentStartDate
-      activityTitle
-      supposedEndDate=currentSupposedEndDate
-      style=styleWidth
-    />
-  }
-
-  let flatListRef = React.useRef(Js.Nullable.null)
-
   React.useEffect2(() => {
     let (currentStartDate, _) = currentWeek
     let index = last5Weeks->Js.Array2.findIndex(week => {
       let (weekStart, _) = week
       weekStart->Js.Date.toString == currentStartDate
     })
-    flatListRef.current
+    let dates = last5Weeks[index]->Option.getWithDefault(todayDates)
+    if dates !== currentDates {
+      currentDates_set(_ => dates)
+    }
+    scrollViewRef.current
     ->Js.Nullable.toOption
-    ->Option.map(flatList =>
-      flatList->FlatList.scrollToIndex(FlatList.scrollToIndexParams(~index, ~animated=false, ()))
+    ->Option.map(scrollView =>
+      scrollView->ScrollView.scrollTo(
+        ScrollView.scrollToParams(
+          ~x=index->Js.Int.toFloat *. (scrollViewWidth -. rightSpace),
+          ~y=0.,
+          ~animated=false,
+          (),
+        ),
+      )
     )
     ->ignore
     None
@@ -180,20 +168,53 @@ let make = (
     <Row> <Spacer size=XS /> <BlockHeading text="Activity chart" /> </Row>
     <Separator style={theme.styles["separatorOnBackground"]} />
     <View style={theme.styles["background"]}>
-      <FlatList
-        ref={flatListRef->Ref.value}
-        horizontal=true
-        pagingEnabled=true
-        showsHorizontalScrollIndicator=false
-        inverted=true
-        initialNumToRender=1
-        data=last5Weeks
-        style={Style.array([theme.styles["background"], styleWidth])}
-        getItemLayout
-        keyExtractor={((first, _), _index) => first->Js.Date.toString}
-        renderItem
-        onViewableItemsChanged
-      />
+      <SpacedView vertical=None>
+        <ScrollView
+          ref={scrollViewRef->Ref.value}
+          horizontal=true
+          pagingEnabled=true
+          showsHorizontalScrollIndicator=false
+          onMomentumScrollEnd
+          style={Style.array([Predefined.styles["row"], Predefined.styles["flexGrow"]])}>
+          {last5Weeks
+          ->Array.map(((currentStartDate, currentSupposedEndDate)) => {
+            let endDate = currentSupposedEndDate->Date.min(today)
+            let fetchedEvents = getEvents(currentStartDate, endDate)
+            let events = switch fetchedEvents {
+            | Done(evts) => Some(evts)
+            | _ => None
+            }
+            let filteredEvents =
+              events
+              ->Option.map(event =>
+                event
+                ->Calendars.filterEvents(
+                  settings.calendarsSkipped,
+                  settings.activitiesSkippedFlag,
+                  settings.activitiesSkipped,
+                )
+                ->Calendars.filterEventsByTitle(activityTitle)
+                ->Calendars.sortEventsByDecreasingStartDate
+              )
+              ->Option.getWithDefault([])
+            Js.log(filteredEvents)
+            Js.log(currentStartDate)
+            <WeeklyBarChartDetail
+              key={currentStartDate->Js.Date.toString}
+              today
+              todayFirst
+              previousFirst
+              events=filteredEvents
+              startDate=currentStartDate
+              activityTitle
+              supposedEndDate=currentSupposedEndDate
+              width=scrollViewWidth
+              rightSpace
+            />
+          })
+          ->React.array}
+        </ScrollView>
+      </SpacedView>
       <Separator style={theme.styles["separatorOnBackground"]} />
     </View>
     <Row> <Spacer size=XS /> <BlockHeading text="Events" /> </Row>
